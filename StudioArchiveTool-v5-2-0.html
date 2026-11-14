@@ -1,0 +1,2793 @@
+<!DOCTYPE html>
+
+<!--Copyright (c) 2026 Connor Milton. All rights reserved.-->
+
+<!--Permission is granted to use, copy, and modify this software, and to-->
+<!--distribute copies and modified versions, solely for Noncommercial-->
+<!--Purposes, provided this notice is retained in all copies.-->
+
+<!--"Noncommercial Purposes" means personal, educational, research, and-->
+<!--archival use, and use by a nonprofit organization in furtherance of-->
+<!--its mission, in each case where the software is not sold, licensed,-->
+<!--or used to provide a paid product or service.-->
+
+<!--Any other use, including any use by or on behalf of a for-profit-->
+<!--business or any use in connection with a paid product or service,-->
+<!--requires a separate written commercial license from Connor Milton-->
+<!--(miltonc90@gmail.com). No such use is permitted under this license.-->
+
+<!--THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.-->
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Studio Archive Search</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js/dist/fuse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <style>
+        :root {
+            --blackish: #141210;
+            --whitish: #E8E4D9;
+            --color-1: #141210;
+            --color-2: #ffffff;
+            --color-3: #ffffff;
+            --bg: #243B3B;
+            --btn_bg: var(--blackish);
+            --btn_fg: var(--header);
+            --th_fg: #8B3A2A;
+            --header: #D0704A;
+            --hover_bg: #0F2020;
+            --hover_fg: #8B3A2A;
+            --even_row: #F0DDD0;
+            --odd_row: #E8D0C0;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--whitish);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 2em;
+        }
+        .container { max-width: 1600px; margin: auto; }
+        h1 {
+            color: var(--header);
+            border-bottom: 2px solid var(--blackish);
+            padding-bottom: 0.2em;
+        }
+
+        #loader {
+            padding: 0px;
+            background-color: transparent;
+            border-radius: 5px;
+            margin-bottom: 2em;
+        }
+        #csv-file { display: none; }
+        .file-label {
+            background-color: var(--btn_bg);
+            color: var(--btn_fg);
+            padding: 10px 15px;
+            border: 3px solid black;
+            border-radius: 1px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .file-label:hover { background-color: var(--hover_bg); color: var(--hover_fg); border: 3px solid black}
+
+        #search-row  {
+          display: flex;
+          gap: 8px;
+          margin-bottom: 2em;
+        }
+        #searchInput {
+            flex: 1 1 auto;
+            width: 100%;
+            padding: 12px 15px;
+            margin: 0em; /* margin-bottom: 2em; */
+            background-color: #00000040;
+            color: var(--whitish);
+            border: 1px solid var(--color-1);
+            border-radius: 5px;
+            font-size: 1.1em;
+            box-sizing: border-box;
+        }
+        #searchInput:focus {
+            outline: none;
+            border-color: var(--color-3);
+        }
+        #search-button {
+            flex: 0 0 auto;
+            padding: 0 18px;
+            font-size: 1em;
+        }
+        #search-button:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+
+        #csv-status, #web-status, #file-status {
+            margin-top: 1em;
+            font-style: italic;
+            color: var(--whitish);
+            opacity: 0.6;
+        }
+
+        /* Separate border model: each cell owns its borders, so they
+           travel with sticky headers (collapsed borders do not). */
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.9em;
+            color: black;
+        }
+        th, td {
+            border-right: 3px solid black;
+            border-bottom: 3px solid black;
+            padding: 10px;
+            text-align: left;
+            vertical-align: top;
+        }
+        th:first-child, td:first-child { border-left: 3px solid black; }
+        th {
+            background-color: var(--btn_bg);
+            background-clip: padding-box;
+            border-top: 3px solid black;
+            color: var(--th_fg);
+            white-space: nowrap;
+            cursor: help;
+        }
+        th[data-note] {
+            position: relative;
+            cursor: help;
+        }
+        th[data-note]::after {
+            content: attr(data-note);
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--odd_row);
+            color: var(--blackish);
+            padding: 6px 10px;
+            width: min(200px, calc(100vw - 40px));
+            border-radius: 1px;
+            font-size: 0.8em;
+            font-family: "menlo", monospace;
+            text-align: center;
+            white-space: normal;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+            transition-delay: 300ms;
+            margin-top: 6px;
+            z-index: 10;
+            box-sizing: border-box;
+            border: 1px solid var(--blackish);
+        }
+        th[data-note]:hover::after {
+            opacity: 1;
+        }
+
+		tr { --row-bg: var(--odd_row); background-color: var(--row-bg); }
+        tr:nth-child(even) { --row-bg: var(--even_row); }
+
+        /* Clamped preview; [...] sits at the end of the cell's available space */
+        td.expandable { --preview-lines: 2; }
+        .expandable-wrap { position: relative; }
+        .expandable-text {
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: var(--preview-lines);
+            overflow: hidden;
+            white-space: pre-line;
+            overflow-wrap: anywhere;
+        }
+        .expand-btn {
+            display: none;
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            padding: 0 0 0 1.75em;
+            border: 0;
+            background: linear-gradient(to right, transparent, var(--row-bg) 45%);
+            color: blue;
+            cursor: pointer;
+            font: inherit;
+            line-height: inherit;
+            text-decoration: underline;
+        }
+        .expandable-wrap.is-overflowing .expand-btn,
+        .expandable-wrap.is-expanded .expand-btn { display: inline-block; }
+        .expandable-wrap.is-expanded .expandable-text {
+            display: inline;
+            -webkit-line-clamp: none;
+            overflow: visible;
+        }
+        .expandable-wrap.is-expanded .expand-btn {
+            position: static;
+            padding-left: 0;
+            margin-left: 4px;
+            background: none;
+        }
+
+        a { color: blue; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        #search-shell { position: relative; }
+
+        .results-section > summary {
+            list-style: none;
+            cursor: pointer;
+            color: var(--header);
+            font-weight: bold;
+            padding: 0.35em 0;
+        }
+        .results-section > summary::-webkit-details-marker { display: none; }
+        .results-section > summary::before {
+            content: '▸';
+            display: inline-block;
+            margin-right: 0.5em;
+            color: var(--header);
+            transition: transform 0.2s;
+        }
+        .results-section[open] > summary::before { transform: rotate(90deg); }
+        .results-section > summary:hover { color: var(--hover_fg); }
+        .results-section > summary:focus-visible {
+            outline: 1px solid var(--header);
+            outline-offset: 4px;
+        }
+
+        #search-mode-controls {
+            display: flex;
+            gap: 6px;
+            margin: -1.5em 0 1.5em 4px;
+        }
+        .search-mode-button {
+            width: 38px;
+            height: 28px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--btn_bg);
+            color: var(--whitish);
+            border: 1px solid #00000080;
+            border-radius: 2px;
+            cursor: pointer;
+            opacity: 0.55;
+        }
+        .search-mode-button:hover {
+            color: var(--hover_fg);
+            background: var(--hover_bg);
+            opacity: 1;
+        }
+        .search-mode-button[aria-pressed="true"] {
+            color: var(--header);
+            border-color: var(--header);
+            box-shadow: inset 0 -2px var(--header);
+            opacity: 1;
+        }
+        .search-mode-button:focus-visible {
+            outline: 1px solid var(--header);
+            outline-offset: 2px;
+        }
+        .search-mode-icon {
+            font-family: Menlo, Consolas, monospace;
+            font-size: 0.78em;
+            font-weight: bold;
+            pointer-events: none;
+        }
+
+        /* Hidden by default; shown only while the fuzzy button is pressed */
+        #fuzzy-tolerance-container {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            margin-left: 8px;
+            margin-top: 2px;
+        }
+        .search-mode-button[data-search-mode="fuzzy"][aria-pressed="true"] ~ #fuzzy-tolerance-container {
+            display: flex;
+        }
+
+        #fuzzy-tolerance {
+            width: 100px;
+            height: 3px;
+            accent-color: var(--th_fg);
+            cursor: pointer;
+        }
+        #fuzzy-tolerance::-webkit-slider-runnable-track {
+            height: 4px;
+            background: var(--blackish);
+            border-radius: 2px;
+        }
+        #fuzzy-tolerance::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            background: var(--header);
+            border-radius: 50%;
+            margin-top: -5px;
+            cursor: pointer;
+        }
+        #tolerance-value {
+            font-size: 0.8em;
+            color: var(--header);
+            min-width: 2.5ch;
+            text-align: right;
+            transform: translateY(0.5px);
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+
+        #tolerance-tag {
+        	font-size: 0.8em;
+            color: var(--header);
+            min-width: 2.5ch;
+            text-align: right;
+            transform: translateY(0.5px);
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+
+        #fuzzy-tolerance-container:hover #tolerance-value,
+        #fuzzy-tolerance:active ~ #tolerance-value {
+            opacity: 1;
+        }
+
+        #search-progress {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: linear-gradient(to bottom, var(--hover_bg), var(--bg));
+            z-index: 1000;
+            display: grid;
+            place-items: center;
+            opacity: .8;
+            transition: opacity 330ms ease-out;
+        }
+        .search-progress-text {
+            position: relative;
+            z-index: 1;
+            padding: 12px 20px;
+            color: var(--whitish);
+            background: var(--blackish);
+            border: 2px solid var(--btn_fg);
+            border-radius: 3px;
+            font-size: 3em;
+            font-style: italic;
+        }
+        #search-progress[hidden] { display: none; }
+
+        .result-row { cursor: default; }
+        .result-row button { transition: background-color 0.2s; }
+
+        td iframe { display: block; margin: 0; }
+
+        td[data-note] {
+            position: relative;
+            cursor: help;
+        }
+        td[data-note]::after {
+            content: attr(data-note);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--odd_row);
+            color: var(--blackish);
+            padding: 6px 10px;
+            width: min(250px, calc(100vw - 40px));
+            border-radius: 1px;
+            font-size: 0.8em;
+            font-family: "menlo", monospace;
+            text-align: center;
+            white-space: normal;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+            transition-delay: 300ms;
+            margin-bottom: 6px;
+            z-index: 20;
+            box-sizing: border-box;
+            border: 1px solid var(--blackish);
+        }
+        td[data-note]:hover::after { opacity: 1; }
+
+        .results-section th {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background-color: var(--btn_bg);
+        }
+
+
+        #fileResultsTable th, #fileResultsTable td {
+            padding: 8px 10px;
+            text-align: left;
+            vertical-align: top;
+            min-width: 10px;
+            white-space: normal;
+        }
+        #fileResultsTable th:nth-child(1), #fileResultsTable td:nth-child(1) { min-width: 9ch; max-width: 9ch; }
+        #fileResultsTable th:nth-child(2), #fileResultsTable td:nth-child(2) { min-width: 5ch; max-width: 10ch; }
+        #fileResultsTable th:nth-child(3), #fileResultsTable td:nth-child(3) { min-width: 20ch; max-width: 40ch; }
+        #fileResultsTable th:nth-child(4), #fileResultsTable td:nth-child(4) { min-width: 15ch; max-width: 30ch; }
+        #fileResultsTable th:nth-child(5), #fileResultsTable td:nth-child(5) { min-width: 20ch; max-width: 50ch; }
+        #fileResultsTable th:nth-child(6), #fileResultsTable td:nth-child(6) { min-width: 20ch; max-width: 60ch; }
+        #fileResultsTable th:nth-child(7), #fileResultsTable td:nth-child(7) { min-width: 20ch; max-width: 40ch; }
+        #fileResultsTable th:nth-child(8), #fileResultsTable td:nth-child(8) { min-width: 12ch; max-width: 20ch; }
+
+        #webResultsTable th, #webResultsTable td {
+            padding: 8px 10px;
+            text-align: left;
+            vertical-align: top;
+            min-width: auto;
+            white-space: normal;
+        }
+        #webResultsTable th:nth-child(1), #webResultsTable td:nth-child(1) { min-width: 15ch; max-width: 25ch; }
+        #webResultsTable th:nth-child(2), #webResultsTable td:nth-child(2) { min-width: 30ch; max-width: 60ch; }
+        #webResultsTable th:nth-child(3), #webResultsTable td:nth-child(3),
+        #webResultsTable th:nth-child(4), #webResultsTable td:nth-child(4) { min-width: 10ch; max-width: 15ch; white-space: nowrap; }
+
+        #csv-results-section .table-container {
+            max-height: 70vh;
+            overflow-y: clip;
+            /* overflow-x: auto; */
+            border: 1px solid var(--blackish);
+        }
+        #csvResultsTable {
+            width: auto;
+            table-layout: auto;
+        }
+        #csvResultsTable th, #csvResultsTable td,
+        #fileResultsTable th, #fileResultsTable td,
+        #webResultsTable th, #webResultsTable td   {
+            padding: 8px 10px;
+            text-align: left;
+            vertical-align: top;
+            min-width: auto;
+            max-width: none;
+            width: auto;
+            white-space: normal;
+            overflow: visible;
+            text-overflow: clip;
+        }
+        #csvResultsTable th:nth-child(1), #csvResultsTable td:nth-child(1) { min-width: 8ch; max-width: 15ch; }
+        #csvResultsTable th:nth-child(2), #csvResultsTable td:nth-child(2) { min-width: 8ch; max-width: 12ch; }
+        #csvResultsTable th:nth-child(3), #csvResultsTable td:nth-child(3) { min-width: 12ch; max-width: 25ch; }
+        #csvResultsTable th:nth-child(4), #csvResultsTable td:nth-child(4) { min-width: 12ch; max-width: 25ch; }
+        #csvResultsTable th:nth-child(5), #csvResultsTable td:nth-child(5) { min-width: 15ch; max-width: 30ch; }
+        #csvResultsTable th:nth-child(6), #csvResultsTable td:nth-child(6) { min-width: 10ch; max-width: 15ch; }
+        #csvResultsTable th:nth-child(7), #csvResultsTable td:nth-child(7) { min-width: 20ch; max-width: 40ch; }
+        #csvResultsTable th:nth-child(8), #csvResultsTable td:nth-child(8) { min-width: 12ch; max-width: 20ch; }
+        #csvResultsTable th:nth-child(9), #csvResultsTable td:nth-child(9) { min-width: 20ch; max-width: 50ch; }
+        #csvResultsTable th:nth-child(10), #csvResultsTable td:nth-child(10) { min-width: 15ch; max-width: 30ch; }
+        #csvResultsTable th:nth-child(11), #csvResultsTable td:nth-child(11) { min-width: 10ch; max-width: 20ch; }
+        #csvResultsTable th {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background-color: var(--btn_bg);
+            white-space: nowrap;
+        }
+
+        #readme-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 2000;
+            overflow-y: auto;
+        }
+        #readme-modal.active { display: block; }
+        #readme-content {
+            background: var(--whitish);
+            color: var(--blackish);
+            max-width: 900px;
+            margin: 2em auto;
+            padding: 2em;
+            border-radius: 5px;
+            position: relative;
+        }
+        #readme-close {
+            position: absolute;
+            top: 1em;
+            right: 1em;
+            background: var(--btn_bg);
+            color: var(--btn_fg);
+            border: none;
+            padding: 0.5em 1em;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #readme-close:hover {
+            background: var(--hover_bg);
+            color: var(--hover_fg);
+        }
+        #readme-content h2 {
+            color: var(--header);
+            border-bottom: 2px solid var(--blackish);
+            padding-bottom: 0.3em;
+        }
+        #readme-content h3 {
+            color: var(--blackish);
+            margin-top: 1.5em;
+        }
+        #readme-content pre {
+            background: var(--even_row);
+            padding: 1em;
+            border-radius: 3px;
+            overflow-x: auto;
+            font-size: 0.85em;
+        }
+        #readme-content code {
+            background: var(--even_row);
+            padding: 0.2em 0.4em;
+            border-radius: 2px;
+            font-family: Menlo, Consolas, monospace;
+        }
+        #readme-toggle {
+            font-size: 0.45em;
+            margin-left: 1em;
+            background: transparent;
+            color: var(--header);
+            border: 1px solid var(--header);
+            padding: 1px 10px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #readme-toggle:hover {
+            background: var(--header);
+            color: var(--blackish);
+        }
+        .export-btn {
+            margin-left: 1em;
+            background: var(--btn_bg);
+            color: var(--btn_fg);
+            border: 2px solid var(--blackish);
+            padding: 4px 12px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+        .export-btn:hover {
+            background: var(--hover_bg);
+            color: var(--hover_fg);
+        }
+
+        .image-link {
+            display: inline-block;
+            text-align: center;
+            margin: 2px;
+            vertical-align: top;
+        }
+        .image-link img {
+            display: block;
+            border: 1px solid var(--blackish);
+            border-radius: 2px;
+            object-fit: cover;
+        }
+        .image-link .image-label {
+            display: block;
+            font-size: 0.65em;
+            color: var(--blackish);
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin-top: 2px;
+        }
+        .image-link:hover .image-label {
+            text-decoration: underline;
+            color: blue;
+        }
+
+        .image-strip {
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: flex-start;
+            gap: 4px;
+            max-width: 340px;   /* caps the column; extra thumbnails scroll sideways */
+            overflow-x: auto;
+        }
+        .image-strip .image-link {
+            flex: 0 0 auto;
+            margin: 0;
+        }
+        .image-strip .image-missing {
+            flex: 0 0 auto;
+            align-self: center;
+            color: #888;
+            font-size: 0.8em;
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Studio Archive Search <button type="button" id="readme-toggle">README</button></h1>
+
+    <div id="loader">
+        <button type="button" id="import-archive" class="file-label">
+            Import Archive
+        </button>
+
+        <input
+            type="file"
+            id="archive-folder"
+            webkitdirectory
+            multiple
+            hidden
+        >
+
+        <span id="file-name" hidden></span>
+        <span id="txt-file-name"></span>
+    </div>
+
+    <div id="search-shell" data-loading-mode="below">
+        <div id="search-row">
+            <input type="text" id="searchInput" placeholder="Import to begin..." autocomplete="off">
+            <button type="button" id="search-button" class="file-label" disabled>Search</button>
+        </div>
+
+        <div
+            id="search-mode-controls"
+            role="group"
+            aria-label="Search matching mode"
+        >
+            <button
+                type="button"
+                class="search-mode-button"
+                data-search-mode="literal"
+                aria-label="Literal string matching"
+                aria-pressed="false"
+                title="Precise"
+            >
+                <span class="search-mode-icon" aria-hidden="true">abc</span>
+            </button>
+
+            <button
+                type="button"
+                class="search-mode-button"
+                data-search-mode="fuzzy"
+                aria-label="Fuzzy matching"
+                aria-pressed="true"
+                title="Tolerant"
+            >
+                <span class="search-mode-icon" aria-hidden="true">a~c</span>
+            </button>
+
+            <div id="fuzzy-tolerance-container">
+                <label for="fuzzy-tolerance"></label>
+                <input
+                    type="range"
+                    id="fuzzy-tolerance"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    aria-label="Fuzzy matching Tolerance"
+                    value="0.3"
+                    autocomplete="off"
+                >
+                <span id="tolerance-value">0.30</span>
+				<span id="tolerance-tag">misspelling tolerance</span>
+
+            </div>
+        </div>
+
+        <div
+            id="search-progress"
+            role="status"
+            aria-live="polite"
+            hidden
+        >
+            <div class="search-progress-text">
+                Searching records...
+            </div>
+        </div>
+    </div>
+
+    <div id="file-status">Files not loaded</div>
+    <details id="file-results-section" class="results-section">
+        <summary><button type="button" class="export-btn" data-section="file">Export</button>  Hard drives </summary>
+
+        <table id="fileResultsTable">
+            <thead>
+                <tr>
+                    <th>Backup ID</th>
+                    <th 			data-note="Drive type/category from master log">
+						Type</th>
+                    <th 			data-note="Combined Notes and Source Notes Spreadsheet from master log">
+						Notes</th>
+                    <th>Source File</th>
+                    <th>Matching Text</th>
+                    <th 			data-note="Full path for filetrees, row/line number for spreadsheets, filepath lists and the master log">
+						Path</th>
+                    <th 			data-note="HD Name from master log. Hover to see ALT HD Name if available.">
+						Volume</th>
+                    <th>Images</th>
+                </tr>
+            </thead>
+            <tbody id="fileResultsBody"></tbody>
+        </table>
+    </details>
+
+    <div id="web-status">Files not loaded</div>
+    <details id="web-results-section" class="results-section">
+        <summary><button type="button" class="export-btn" data-section="web">Export</button>  Web (Wayback)</summary>
+
+        <table id="webResultsTable">
+            <thead>
+                <tr>
+                    <th>Source File</th>
+                    <th>Matching Text</th>
+                    <th>Online Link</th>
+                    <th 			data-note="Only works if app is downloaded and run locally">
+						Offline Link</th>
+                </tr>
+            </thead>
+            <tbody id="webResultsBody"></tbody>
+        </table>
+    </details>
+
+    <div id="csv-status">CSV not loaded</div>
+    <details id="csv-results-section" class="results-section">
+        <summary><button type="button" class="export-btn" data-section="vault">Export</button>  Vault images </summary>
+        <div class="table-container">
+            <table id="csvResultsTable">
+                <thead>
+                    <tr>
+                        <th 			data-note="If there are two items in IMG_0420.JPEG, they would index as 0420_001 and 0420_002 (left to right, lowest row first).">
+							IMAGE ID</th>
+                        <th 			data-note="'Tape #' is a manually marked number drawn inside a triangle; the session-specific Reel number can be found in the Code and/or notes">
+							Tape #</th>
+                        <th>Studio</th>
+                        <th>Client</th>
+                        <th>Artist</th>
+                        <th>Date</th>
+                        <th>Title / Track</th>
+                        <th 			data-note="Medium type (example: 2 inch tape, hard drive, etc.)">
+							Type</th>
+                        <th>Notes</th>
+                        <th>Source Image</th>
+                        <th 			data-note="Tape code [session code | channel count | reel number | tape code (M = Master)]">
+							Code</th>
+                    </tr>
+                </thead>
+                <tbody id="resultsBody"></tbody>
+            </table>
+        </div>
+    </details>
+</div>
+
+<div id="readme-modal">
+    <div id="readme-content">
+        <button type="button" id="readme-close">Close</button>
+        <h2>Studio Archive Search Tool — Documentation</h2>
+            <p>This application is built for for an archive directory that matches the following setup and format(s).</p>
+        <h3>HOW TO USE</h3>
+            <p>Import an archive database (unzipped) that follows the structure below.  Search to view and export results.  If using custom files, keep in mind the file headers must match the required headers (case sensitive!).</p>
+        <h3>Search Modes</h3>
+            <p><strong>Precise [abc]:</strong> Exact matching. Faster and precise.</p>
+            <p><strong>Tolerant [a~c]:</strong> Adjustable tolerance for misspellings & typos. </p>
+        <h3>Directory Structure</h3>
+        <pre>
+archive/
+├── filetrees/
+│   └── *.txt
+│
+├── hard-drives/
+│   ├── master-hd-log.csv
+│   ├── filepaths/
+│   │   └── *.txt
+│   ├── screenshots/
+│   │   └── *.jpg, *.jpeg, *.png
+│   └── spreadsheets/
+│       └── *.csv
+│
+├── images/
+│   ├── *.jpg, *.jpeg, *.png, *.heic, etc.
+│   └── image-index/
+│       └── image-index.csv
+│
+└── web-archive/
+    ├── web-archive-links.csv
+    └── text-list/
+        └── *.txt
+        </pre>
+
+        ALL SEARCHABLE SOURCES:
+        <ol>
+            <li><code>images/</code> - All image files referenced in the image-index
+                <br><code>image-index.csv</code> - Itemized list of contents and information visible on photographed elements
+            <li><code>master-hd-log.csv</code> - A cross-reference for related hard drive information (each row is also searchable by Backup ID, name, type and notes)
+                <br><code>filepaths/</code> - Txt files of full file paths of itemized drive contents, listed in rows, with directories ending with "/"
+                <br><code>screenshots/</code> - Screenshots of drive contents named by Backup ID + "_screenshot.jpg"
+                <br><code>spreadsheets/</code> - CSV files of itemized drive contents named by Backup ID + "_spreadsheet.csv"
+                <br><code>filetrees.txt</code> - Command line exports of itemized hard drive contents named by Backup ID + "_filetree.txt"
+        		<br><code>writtenShowLog.csv</code> - Show-level notes cross-referenced by Backup ID (HD name, date, artist, show notes)
+            <li><code>web-archive/text-list/*.txt</code> - Parsed page text, one blank-line-separated block per record
+                <br><code>web-archive-links.csv</code> - Required cross-reference mapping each text-list file to its Wayback URL and local HTML copy (see format below)
+		</ol>
+
+        <h3>Data Categories & Searchable Fields</h3>
+
+        <h4>1. Vault Images</h4>
+            <p>Physical media inventory with visual documentation.</p>
+			<p>Headers (image-index.csv):</p>
+        	<pre>IMAGE ID, Tape #, Studio, Client, Artist, Date, Title / Track, Type, Notes, Code, Source Image</pre>
+		<ul>
+                <li><code>IMAGE ID</code> — Source and object identifier (####_###): counter follows elements; Left -> Right, Bottom -> Top </li>
+                <li><code>Tape #</code> — Strictly refers to in-house vault identifiers, not the session reel number</li>
+                <li><code>Studio</code> — ...</li>
+                <li><code>Client</code> — ...</li>
+                <li><code>Artist</code> — ...</li>
+                <li><code>Date</code> — ...</li>
+                <li><code>Title / Track</code> — Ex: [Session/Album: Track1; Track2]</li>
+                <li><code>Type</code> — Recording medium (2 inch tape, A-DAT, etc.)</li>
+                <li><code>Notes</code> — ...</li>
+                <li><code>Code</code> — Tape code [session code | channel count | reel number | tape code (M = Master)].  This may be derived in the return data, not necessarily written on the tape.</li>
+                <li><code>Source Image</code> — The image file, which should link to opening the image</li>
+            </ul>
+
+        <h4>2. Hard Drive Contents</h4>
+            <p>Digital archive spanning all logged backup drives. Unified by a Backup ID.</p>
+            <p>Headers (master-hd-log.csv):</p>
+        	<pre>BACKUP ID, PARTITION ID, Image-1, Image-2, Image-3, Source Notes Spreadsheet, Incomplete, HD Name, ALT HD Name, Type, Notes, HD Power Supply, Source Doc, Source Screenshot, Source Filetree, Source Spreadsheet </pre>
+		<ul>
+                <li><code>BACKUP ID</code> — Drive identifier (######-##)
+                <li><code>PARTITION ID</code> — Sub-identifier, tags on partition number and enumerator
+                <li><code>Image-1</code> — ...
+                <li><code>Image-2</code> — ...
+                <li><code>Image-3</code> — ...
+                <li><code>Source Notes Spreadsheet</code> — Name of original document referenced for Notes
+                <li><code>Incomplete</code> — 'TRUE' if data collection is incomplete
+                <li><code>HD Name</code> — Primary drive name
+                <li><code>ALT HD Name</code> — Alternate drive name (tooltip)
+                <li><code>Type</code> — Manufacturer (OWC, Lacie, etc).
+                <li><code>Notes</code> & <code>Source Notes Spreadsheet</code> — Combined display
+                <li><code>HD Power Supply</code> — Identifies the type of power supply required
+                <li><code>Source Doc</code> — Reference for documents containing original data
+                <li><code>Source Screenshot</code> — Reference for screenshot images containing original data
+                <li><code>Source Filetree</code> — Reference for filetree files containing original data
+                <li><code>Source Spreadsheet</code> — Reference for spreadsheet files containing original data
+            </ul>
+            <p>Filetree search: Full directory paths from <code>tree</code> command output.  Returns matched text, parent directory, source Volume and Backup ID derived from source filename.</p>
+            <p>Spreadsheet search: Line by line content from csv files.  Returns matched text, row number and Backup ID derived from source filename.  Cross references master-hd-log to return Volume.</p>
+            <p>Screenshot search: Line by line content from txt files.  Returns matched text, row number and Backup ID derived from source filename.  Best formatted where each txt file line is a full filepath.  Cross references master-hd-log to return Volume.</p>
+
+        <h4>Written Show Log</h4>
+            <p>Curated show-level metadata. Returns show notes by association via Backup ID.</p>
+        	<p>Headers (writtenShowLog.csv):</p>
+			<pre>HD BACKUP ID, BU BACKUP ID, SHOW ID, Act/Opener, Engineer, HD, BU, Show Notes</pre>
+		<ul>
+                <li><code>HD BACKUP ID</code> — Primary drive dedicated Backup ID</li>
+                <li><code>BU BACKUP ID</code> — Backup drive dedicated Backup ID</li>
+                <li><code>SHOW ID</code> — Links to specific show only (this feature not built yet)</li>
+                <li><code>Act/Opener</code> — ...
+                <li><code>Engineer</code> — Engineer's initials
+                <li><code>HD</code> — Primary drive name
+                <li><code>BU</code> — Backup drive name
+                <li><code>Show Notes</code> — Detailed performance info</li>
+            </ul>
+
+        <h4>3. Web Archive</h4>
+            <p>Wayback Machine snapshots and txt file lists of information organized per webpage.</p>
+            <p>Headers (web-archive-links.csv):</p>
+			<pre>Source File, Matching Text, Online Link, Offline Link</pre>
+			<ul>
+                <li><code>Source File</code> — Text-list filename the record came from</li>
+                <li><code>Matching Text</code> — Full text block from parsed file</li>
+                <li><code>Online Link</code> —"Wayback Machine" link to the archived URL</li>
+                <li><code>Offline Link</code> — Local HTML file and assets (returns file path)</li>
+            </ul>
+
+            <p>Text-list records whose <code>Source File</code> has no row in this CSV still appear in search results,
+            but with empty Online/Offline Link cells.</p>
+
+            <hr>
+            <p style="font-size: .8em; text-align: center; margin-top: 2em; opacity: 0.7;">
+                <em>
+					<br>
+					Copyright (c) 2026 Connor Milton. All rights reserved.<br>
+					</em>
+
+            </p>
+    </div>
+</div>
+
+<script>
+let csvDatabase = [];
+let fuse;
+
+let webArchiveLinksMap = new Map();
+let offlineFilesMap = new Map();
+
+let masterBackupLogMap = new Map();
+let writtenShowLogMap = new Map(); // not yet utilized, keep
+
+let textRecords = [];
+let filetreeDatabase = [];
+let listDatabase = [];
+let filepathDatabase = [];
+let spreadsheetDatabase = [];
+let masterLogDatabase = [];
+let filetreeFuse;
+let listFuse;
+let filepathFuse;
+let spreadsheetFuse;
+let masterLogFuse;
+
+let imageFiles = new Map();
+let screenshotFiles = new Map();
+let imageObjectUrls = new Map();
+let screenshotObjectUrls = new Map();
+
+let searchMode = 'literal';
+
+const CSV_SEARCH_KEYS = [
+    'IMAGE ID', 'Tape #', 'Studio', 'Client', 'Artist', 'Date',
+    'Title / Track', 'Type', 'Notes', 'Source', 'Future Use', 'Code'
+];
+
+const TEXT_SEARCH_KEYS = ['matchingText', 'id'];
+// Filepath lists are one record per line; searching 'id' (which embeds the
+// filename stem) would match every line of a drive on a Backup ID search.
+const FILEPATH_SEARCH_KEYS = ['matchingText'];
+const SPREADSHEET_SEARCH_KEYS = ['searchText', 'spreadsheetId'];
+const MASTER_LOG_SEARCH_KEYS = ['searchText', 'backupId'];
+
+function normalizeHeaderKey(header) {
+    return String(header ?? '')
+        .replace(/^\uFEFF/, '')
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_]+/g, ' ');
+}
+
+// normalized header -> canonical key used by CSV_SEARCH_KEYS / VAULT_TEXT_COLUMNS
+const VAULT_HEADER_ALIASES = {
+    'image id': 'IMAGE ID', 'imageid': 'IMAGE ID', 'id': 'IMAGE ID',
+    'tape #': 'Tape #', 'tape': 'Tape #', 'tape number': 'Tape #',
+    'studio': 'Studio',
+    'client': 'Client',
+    'artist': 'Artist',
+    'date': 'Date',
+    'title / track': 'Title / Track', 'title/track': 'Title / Track', 'title': 'Title / Track',
+    'type': 'Type',
+    'notes': 'Notes',
+    'source': 'Source', 'source image': 'Source', 'source images': 'Source',
+    'future use': 'Future Use',
+    'code': 'Code'
+};
+
+async function unzipFile() {
+    const fileInput = document.getElementById('zipFileInput');
+    const outputDiv = document.getElementById('output');
+
+    if (!fileInput.files.length) {
+        outputDiv.textContent = 'Please select a .zip file.';
+        return;
+    }
+
+    const file = fileInput.files[0];
+    if (!file.name.endsWith('.zip')) {
+        outputDiv.textContent = 'Please select a valid .zip file.';
+        return;
+    }
+
+    try {
+        const zip = await JSZip.loadAsync(file);
+        outputDiv.textContent = `Unzipping ${file.name}...`;
+
+        // Extract all files from the zip
+        const files = [];
+        zip.forEach((relativePath, zipEntry) => {
+            files.push({
+                name: relativePath,
+                content: zipEntry.dir ? null : zipEntry.async('blob')
+            });
+        });
+
+        // Process each file
+        for (const fileInfo of files) {
+            if (fileInfo.content) {
+                const blob = await fileInfo.content;
+                const url = URL.createObjectURL(blob);
+                outputDiv.innerHTML += `<p>Extracted: ${fileInfo.name} <a href="${url}" download="${fileInfo.name}">Download</a></p>`;
+            }
+        }
+    } catch (error) {
+        outputDiv.textContent = `Error unzipping file: ${error.message}`;
+    }
+}
+
+function canonicalVaultHeader(header) {
+    const key = normalizeHeaderKey(header);
+    return VAULT_HEADER_ALIASES[key] || String(header).replace(/^\uFEFF/, '').trim();
+}
+
+const ARCHIVE_PATHS = {
+    imageIndex:            'images/image-index/image-index.csv',
+    filetrees:             'hard-drives/filetrees/',
+    webList:               'web-archive/text-list/',
+    images:                'images/',
+    masterLog:             'hard-drives/master-hd-log.csv',
+    writtenShowLog:            'hard-drives/writtenShowLog.csv',
+    weblinks:              'web-archive/web-archive-links.csv',
+    contentSpreadsheets:   'hard-drives/spreadsheets/',
+    screenshots:           'hard-drives/screenshots/',
+    filepaths:             'hard-drives/filepaths/',
+};
+
+let importedFiles = [];
+const filesByPath = new Map();
+
+const fuzzyToleranceInput = document.getElementById('fuzzy-tolerance');
+const toleranceValueDisplay = document.getElementById('tolerance-value');
+
+function registerArchiveFiles(files) {
+    importedFiles = files;
+    filesByPath.clear();
+    files.forEach(file => {
+        const path = archiveRelativePath(file);
+        filesByPath.set(path.toLowerCase(), file);
+    });
+}
+
+function importedFileAt(path) {
+    return filesByPath.get(path.toLowerCase()) || null;
+}
+
+const importArchiveButton = document.getElementById('import-archive');
+const archiveFolderInput = document.getElementById('archive-folder');
+
+const searchInput = document.getElementById('searchInput');
+const searchButton = document.getElementById('search-button');
+const resultsBody = document.getElementById('resultsBody');
+const csvStatusDiv = document.getElementById('csv-status');
+const fileNameSpan = document.getElementById('file-name');
+
+const searchProgress = document.getElementById('search-progress');
+
+const webResultsBody = document.getElementById('webResultsBody');
+const webStatusDiv = document.getElementById('web-status');
+
+const fileResultsBody = document.getElementById('fileResultsBody');
+const fileStatusDiv = document.getElementById('file-status');
+
+const searchShell = document.getElementById('search-shell');
+
+const MAX_EXPANDED_ROWS = 500;
+
+const fileResultsSection = document.getElementById('file-results-section');
+const textResultsSection = document.getElementById('web-results-section');
+const csvResultsSection = document.getElementById('csv-results-section');
+
+// let searchDebounceTimer;
+
+const readmeModal = document.getElementById('readme-modal');
+const readmeToggle = document.getElementById('readme-toggle');
+const readmeClose = document.getElementById('readme-close');
+
+readmeToggle.addEventListener('click', () => {
+    readmeModal.classList.add('active');
+});
+
+readmeClose.addEventListener('click', () => {
+    readmeModal.classList.remove('active');
+});
+
+readmeModal.addEventListener('click', (e) => {
+    if (e.target === readmeModal) {
+        readmeModal.classList.remove('active');
+    }
+});
+
+function invalidateFuzzyIndexes() {
+    fuse = null;
+    filetreeFuse = null;
+    listFuse = null;
+    filepathFuse = null;
+    spreadsheetFuse = null;
+    masterLogFuse = null;
+}
+
+const FUZZY_DEFAULT_THRESHOLD = 0.3;
+let fuzzyThreshold = FUZZY_DEFAULT_THRESHOLD;
+
+function resetFuzzySlider() {
+    fuzzyThreshold = FUZZY_DEFAULT_THRESHOLD;
+    fuzzyToleranceInput.value = String(FUZZY_DEFAULT_THRESHOLD);
+    toleranceValueDisplay.textContent = FUZZY_DEFAULT_THRESHOLD.toFixed(2);
+    invalidateFuzzyIndexes();
+}
+
+// let fuzzyThreshold = 0.3;  // See FUZZY_DEFAULT_THRESHOLD
+
+resetFuzzySlider();
+// pageshow fires after load and on back/forward-cache restores,
+// i.e. after the browser has had its chance to restore a stale value.
+window.addEventListener('pageshow', resetFuzzySlider);
+
+fuzzyToleranceInput.addEventListener('input', (e) => {
+    fuzzyThreshold = parseFloat(e.target.value);
+    toleranceValueDisplay.textContent = fuzzyThreshold.toFixed(2);
+    invalidateFuzzyIndexes(); // rebuilt on the next explicit search
+});
+
+const expandOverflowObserver = new ResizeObserver(entries => {
+    entries.forEach(entry => {
+        const textEl = entry.target;
+        const wrap = textEl.parentElement;
+        if (!wrap || wrap.classList.contains('is-expanded')) return;
+        wrap.classList.toggle(
+            'is-overflowing',
+            textEl.scrollHeight > textEl.clientHeight + 1
+        );
+    });
+});
+
+function createExpandableCell(text, previewLines = 2) {
+    const cell = document.createElement('td');
+    const fullText = String(text || '');
+    cell.className = 'expandable';
+    cell.style.setProperty('--preview-lines', String(previewLines));
+    cell.dataset.fullText = fullText;   // used by CSV export
+
+    if (!fullText) return cell;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'expandable-wrap';
+
+    const textEl = document.createElement('span');
+    textEl.className = 'expandable-text';
+    textEl.textContent = fullText;
+
+    const expandBtn = document.createElement('button');
+    expandBtn.type = 'button';
+    expandBtn.className = 'expand-btn';
+    expandBtn.textContent = '[...]';
+
+    expandBtn.addEventListener('click', () => {
+        const expanded = wrap.classList.toggle('is-expanded');
+        expandBtn.textContent = expanded ? '[less]' : '[...]';
+        if (!expanded) {
+            wrap.classList.toggle(
+                'is-overflowing',
+                textEl.scrollHeight > textEl.clientHeight + 1
+            );
+        }
+    });
+
+    wrap.append(textEl, expandBtn);
+    cell.appendChild(wrap);
+    expandOverflowObserver.observe(textEl);
+    return cell;
+}
+
+function documentStem(fileName) {
+    return String(fileName).replace(/\.[^./]+$/, '');
+}
+
+function parseSourceDocument(fileName) {
+    const stem = documentStem(fileName);
+    const match = stem.match(/(\d{6})-(\d{2})/);
+
+    if (!match) {
+        return {
+            stem,
+            backupId: '',
+            sourceTag: '',
+            variant: ''
+        };
+    }
+
+    const remainder =
+        stem.slice(0, match.index) +
+        stem.slice(match.index + match[0].length);
+
+    const variantMatch = remainder.match(/^\([^)]+\)/);
+
+    return {
+        stem,
+        backupId: match[0],
+        sourceTag: remainder,
+        variant: variantMatch ? variantMatch[0] : ''
+    };
+}
+
+// Matches headers such as: Image-1, IMAGE-2, SOURCE IMAGE-3,
+// Source Screenshot, Source File Screenshot, Source File Screenshot 2
+function collectScreenshotNames(row) {
+    const names = [];
+    const screenshotHeader = /^(source\s+)?(file\s+)?(image|screenshot)s?(\s*-?\s*\d+)?$/i;
+
+    Object.entries(row).forEach(([header, value]) => {
+        if (!screenshotHeader.test(String(header).trim())) return;
+
+        String(value ?? '')
+            .split(/[,;]/)
+            .map(s => s.trim())
+            .filter(Boolean)
+            .forEach(name => {
+                if (!names.includes(name)) names.push(name);
+            });
+    });
+
+    return names;
+}
+
+async function loadMasterBackupLog(files) {
+    const logFile = files.find(file => {
+        return archiveRelativePath(file).toLowerCase() ===
+            ARCHIVE_PATHS.masterLog.toLowerCase();
+    });
+
+    if (!logFile) {
+        console.warn('master-hd-log.csv not found');
+        return;
+    }
+
+    try {
+        const csvData = await readCsvWithHeaders(logFile);
+        masterBackupLogMap.clear();
+        masterLogDatabase = [];
+
+        csvData.forEach((row, index) => {
+            const backupId = row['BACKUP ID']?.trim();
+            if (!backupId) return;
+
+            const notesParts = [];
+            const mainNotes = row['Notes']?.trim();
+            const sourceNotes = row['Source Notes Spreadsheet']?.trim();
+
+            if (mainNotes) notesParts.push(mainNotes);
+            if (sourceNotes) notesParts.push(`[Source Notes]: ${sourceNotes}`);
+
+            const screenshots = collectScreenshotNames(row);
+
+            const entry = {
+                hdName: row['HD Name']?.trim() || '',
+                altHdName: row['ALT HD Name']?.trim() || '',
+                type: row['Type']?.trim() || '',
+                notes: notesParts.join('\n\n'),
+                screenshots: screenshots,
+                incomplete: row['INCOMPLETE']?.trim() || '',
+                sourceFile: row['SOURCE FILE']?.trim() || ''
+            };
+
+            masterBackupLogMap.set(backupId.toLowerCase(), entry);
+
+            // Searchable record so a drive turns up even when it has no
+            // filetree / spreadsheet / filepath document.
+            const labeledFields = [
+                ['BACKUP ID', backupId],
+                ['PARTITION ID', row['PARTITION ID']?.trim()],
+                ['HD Name', entry.hdName],
+                ['ALT HD Name', entry.altHdName],
+                ['Type', entry.type],
+                ['Notes', entry.notes],
+                ['Screenshots', screenshots.join(', ')]
+            ]
+                .filter(([, value]) => value)
+                .map(([label, value]) => `${label}: ${value}`);
+
+            masterLogDatabase.push({
+                kind: 'masterlog',
+                backupId,
+                sourceFile: logFile.name,
+                rowNumber: index + 2, // header row + 1-based index
+                searchText: labeledFields.join('\n')
+            });
+        });
+
+        console.log(`Loaded ${masterBackupLogMap.size} master backup log entries`);
+    } catch (error) {
+        console.error('Failed to load master backup log:', error);
+    }
+}
+
+function getDriveInfo(backupId) {
+    if (!backupId) return { hdName: '', altHdName: '', type: '', notes: '', screenshots: [] };
+
+    const normalizedId = backupId.toLowerCase().trim();
+    const entry = masterBackupLogMap.get(normalizedId);
+    const writtenEntry = writtenShowLogMap.get(normalizedId);
+
+    const hdName = entry?.hdName || writtenEntry?.hdName || '';
+
+    return {
+        hdName: hdName,
+        altHdName: entry?.altHdName || '',
+        type: entry?.type || '',
+        notes: entry?.notes || '',
+        screenshots: entry?.screenshots || [],
+        writtenShowLogDate: writtenEntry?.date || '',
+        writtenShowLogNotes: writtenEntry?.showNotes || '',
+        writtenShowLogArtist: writtenEntry?.artist || ''
+    };
+}
+
+function extractBackupIdFromFilename(filename) {
+    const match = filename.match(/(\d{6})-(\d{2})/);
+    return match ? match[0] : '';
+}
+
+function splitPhysicalLines(text) {
+    return text.replace(/^\uFEFF/, '').split(/\r\n|\n|\r/);
+}
+
+function sourceStem(fileName) {
+    return fileName
+        .replace(/\.[^/.]+$/, '')
+        .replace(/\s+/g, '');
+}
+
+function padNumber(value, length) {
+    return String(value).padStart(length, '0');
+}
+
+function joinPath(parentPath, entryName) {
+    if (!parentPath) return entryName;
+    if (parentPath.endsWith('/')) return parentPath + entryName;
+    return `${parentPath}/${entryName}`;
+}
+
+function textSourceKey(sourceFile, fullPath) {
+    return `${sourceFile}\u0000${fullPath}`;
+}
+
+function errorMessage(error) {
+    return error && error.message ? error.message : String(error);
+}
+
+function archiveRelativePath(file) {
+    const relativePath = (file.webkitRelativePath || file.name)
+        .replace(/\\/g, '/');
+
+    const parts = relativePath.split('/').filter(Boolean);
+
+    return parts.length > 1 ? parts.slice(1).join('/') : '';
+}
+
+function filesAtArchivePath(files, archivePath) {
+    const normalizedPath = archivePath
+        .replace(/\\/g, '/')
+        .replace(/^\/+|\/+$/g, '')
+        .toLowerCase();
+
+    const directoryPrefix = `${normalizedPath}/`;
+
+    return files
+        .filter(file => {
+            const path = archiveRelativePath(file).toLowerCase();
+
+            return path === normalizedPath ||
+                path.startsWith(directoryPrefix);
+        })
+        .sort((a, b) => {
+            return archiveRelativePath(a).localeCompare(
+                archiveRelativePath(b)
+            );
+        });
+}
+
+function clearImageObjectUrls() {
+    imageObjectUrls.forEach(url => URL.revokeObjectURL(url));
+    imageObjectUrls.clear();
+    screenshotObjectUrls.forEach(url => URL.revokeObjectURL(url));
+    screenshotObjectUrls.clear();
+}
+
+function imageStemKey(value) {
+    const basename = String(value ?? '')
+        .trim()
+        .replace(/\\/g, '/')
+        .split('/')
+        .pop();
+
+    const extensionIndex = basename.lastIndexOf('.');
+
+    const stem = extensionIndex > 0
+        ? basename.slice(0, extensionIndex)
+        : basename;
+
+    return stem.toUpperCase();
+}
+
+function getImageUrl(fileName) {
+    const key = imageStemKey(fileName);
+    const file = imageFiles.get(key);
+
+    if (!file) return '';
+
+    if (!imageObjectUrls.has(key)) {
+        imageObjectUrls.set(key, URL.createObjectURL(file));
+    }
+
+    return imageObjectUrls.get(key);
+}
+
+function getScreenshotUrl(fileName) {
+    const key = imageStemKey(fileName);
+    const file = screenshotFiles.get(key) || imageFiles.get(key);
+
+    if (!file) return '';
+
+    if (!screenshotObjectUrls.has(key)) {
+        screenshotObjectUrls.set(key, URL.createObjectURL(file));
+    }
+
+    return screenshotObjectUrls.get(key);
+}
+
+function renderImageLink(fileName, url, maxWidth, maxHeight) {
+    const container = document.createElement('a');
+    container.href = url;
+    container.target = '_blank';
+    container.className = 'image-link';
+    container.title = fileName;
+
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = fileName;
+    img.style.maxWidth = `${maxWidth}px`;
+    img.style.maxHeight = `${maxHeight}px`;
+
+    const label = document.createElement('span');
+    label.className = 'image-label';
+    label.textContent = fileName;
+    label.style.maxWidth = `${maxWidth}px`;
+
+    container.appendChild(img);
+    container.appendChild(label);
+
+    return container;
+}
+
+function renderImageStrip(fileNames, resolveUrl, maxWidth, maxHeight) {
+    const strip = document.createElement('div');
+    strip.className = 'image-strip';
+
+    fileNames.forEach(fileName => {
+        const url = resolveUrl(fileName);
+        if (url) {
+            strip.appendChild(renderImageLink(fileName, url, maxWidth, maxHeight));
+        } else {
+            const missing = document.createElement('span');
+            missing.className = 'image-missing';
+            missing.textContent = fileName;
+            strip.appendChild(missing);
+        }
+    });
+
+    return strip;
+}
+
+const IMAGE_EXPORT_SEPARATOR = '; ';
+
+function renderImageCell(fileNames, resolveUrl, maxWidth, maxHeight) {
+    const cell = document.createElement('td');
+    cell.dataset.fullText = fileNames.join(IMAGE_EXPORT_SEPARATOR);
+    cell.appendChild(renderImageStrip(fileNames, resolveUrl, maxWidth, maxHeight));
+    return cell;
+}
+
+async function readCsvWithHeaders(file) {
+    if (!file) return [];
+
+    const text = await file.text();
+
+    const results = await new Promise((resolve, reject) => {
+        Papa.parse(text, {
+            header: true,
+            skipEmptyLines: true,
+            transformHeader: header => String(header).replace(/^\uFEFF/, '').trim(),
+            complete: resolve,
+            error: reject
+        });
+    });
+
+    return results.data;
+}
+
+async function loadWebArchiveLinks(files) {
+    const weblinksFile = files.find(file => {
+        return archiveRelativePath(file).toLowerCase() ===
+            ARCHIVE_PATHS.weblinks.toLowerCase();
+    });
+
+    if (!weblinksFile) {
+        console.warn('web-archive-links.csv not found');
+        return;
+    }
+
+    try {
+        const csvData = await readCsvWithHeaders(weblinksFile);
+
+        webArchiveLinksMap.clear();
+
+        csvData.forEach(row => {
+            const sourceFile = row['Source File']?.trim();
+            const onlineLink = row['Online Link']?.trim();
+            const offlineLink = row['Offline Link']?.trim();
+
+            if (sourceFile && (onlineLink || offlineLink)) {
+                webArchiveLinksMap.set(sourceFile.toLowerCase(), {
+                    online: onlineLink,
+                    offline: offlineLink
+                });
+            }
+        });
+
+        console.log(`Loaded ${webArchiveLinksMap.size} web archive links`);
+    } catch (error) {
+        console.error('Failed to load web archive links:', error);
+    }
+}
+
+function makeSpreadsheetRecord(cells, rowNumber, file) {
+    const values = cells.map(value => String(value ?? ''));
+    const stem = sourceStem(file.name);
+    const parsed = parseSourceDocument(file.name);
+
+    const spreadsheetId = `${stem}_ROW${padNumber(rowNumber, 5)}`;
+
+    return {
+        ...parsed,
+        kind: 'spreadsheet',
+        sourceFile: file.name,
+        rowNumber,
+        spreadsheetId,
+        cells: values,
+        searchText: values.join('\n'),
+    };
+}
+
+function registerOfflineFiles(files) {
+    offlineFilesMap.clear();
+
+    const offlineHtmlFiles = files.filter(file => {
+        const relativePath = archiveRelativePath(file).toLowerCase();
+        return relativePath.startsWith('web-archive/') &&
+               relativePath.endsWith('.html');
+    });
+
+    offlineHtmlFiles.forEach(file => {
+        const path = archiveRelativePath(file).toLowerCase();
+        offlineFilesMap.set(path, file);
+
+        const fileName = path.split('/').pop();
+        offlineFilesMap.set(fileName.toLowerCase(), file);
+    });
+
+    console.log(`Registered ${offlineFilesMap.size} offline HTML files`);
+}
+
+importArchiveButton.addEventListener('click', () => {
+    archiveFolderInput.click();
+});
+
+archiveFolderInput.addEventListener('change', importArchive);
+
+async function importArchive(event) {
+    const files = Array.from(event.target.files || []);
+
+    if (!files.length) return;
+
+    registerArchiveFiles(files);
+
+    importArchiveButton.disabled = true;
+    importArchiveButton.textContent = 'Importing...';
+
+    fileNameSpan.textContent = 'Loading image index...';
+    csvStatusDiv.textContent = 'Importing image index...';
+    webStatusDiv.textContent = 'Importing web records...';
+    fileStatusDiv.textContent = 'Importing hard drive records...';
+
+    const imageIndexFile = files.find(file => {
+        return archiveRelativePath(file).toLowerCase() ===
+            ARCHIVE_PATHS.imageIndex.toLowerCase();
+    });
+
+    const filetreeFiles = filesAtArchivePath(files, ARCHIVE_PATHS.filetrees);
+    const webListFiles = filesAtArchivePath(files, ARCHIVE_PATHS.webList);
+    const selectedImageFiles = filesAtArchivePath(files, ARCHIVE_PATHS.images);
+    const spreadsheetFiles = filesAtArchivePath(files, ARCHIVE_PATHS.contentSpreadsheets);
+    const filepathFiles = filesAtArchivePath(files, ARCHIVE_PATHS.filepaths)
+        .filter(file => /\.txt$/i.test(file.name));
+    const screenshotSourceFiles = filesAtArchivePath(files, ARCHIVE_PATHS.screenshots);
+
+    clearImageObjectUrls();
+    imageFiles.clear();
+    screenshotFiles.clear();
+    webArchiveLinksMap.clear();
+    offlineFilesMap.clear();
+    masterBackupLogMap.clear();
+    masterLogDatabase = [];
+
+    selectedImageFiles.forEach(file => {
+        const key = imageStemKey(file.name);
+
+        if (!key) return;
+
+        if (imageFiles.has(key)) {
+            console.warn(
+                'Multiple images share the same filename stem:',
+                file.name,
+                archiveRelativePath(file)
+            );
+            return;
+        }
+
+        imageFiles.set(key, file);
+    });
+
+    screenshotSourceFiles.forEach(file => {
+        const key = imageStemKey(file.name);
+        if (key && !screenshotFiles.has(key)) {
+            screenshotFiles.set(key, file);
+        }
+    });
+
+    registerOfflineFiles(files);
+    await loadWebArchiveLinks(files);
+    await loadMasterBackupLog(files);
+    await loadwrittenShowLog(files);
+
+    csvDatabase = [];
+    fuse = null;
+    resultsBody.innerHTML = '';
+
+    textRecords = [];
+    filetreeDatabase = [];
+    listDatabase = [];
+    filepathDatabase = [];
+    spreadsheetDatabase = [];
+    spreadsheetFuse = null;
+
+    if (imageIndexFile) {
+        try {
+            const count = await importImageIndex(imageIndexFile);
+            fileNameSpan.textContent = `${imageIndexFile.name} (${count}).`;
+        } catch (error) {
+            fileNameSpan.textContent = `Image index import failed: ${errorMessage(error)}`;
+            csvStatusDiv.textContent = 'CSV not loaded';
+        }
+    } else {
+        fileNameSpan.textContent = 'Image index import failed: image-index/image-index.csv was not found.';
+        csvStatusDiv.textContent = 'CSV not loaded';
+    }
+
+    const textMessages = [];
+
+    const textImports = [
+        {
+            label: 'Website text lists',
+            files: webListFiles,
+            format: 'blocks'
+        },
+        {
+            label: 'Filetrees',
+            files: filetreeFiles,
+            format: 'filetree'
+        },
+        {
+            label: 'Filepath transcriptions',
+            files: filepathFiles,
+            format: 'lines'
+        }
+    ];
+
+    for (const textImport of textImports) {
+        try {
+            const records = await importTextFiles(
+                textImport.files,
+                textImport.format
+            );
+            textRecords.push(...records);
+        } catch (error) {
+            textMessages.push(
+                `${textImport.label} import failed: ${errorMessage(error)}`
+            );
+        }
+    }
+
+    if (textMessages.length) {
+        console.warn(textMessages.join('\n'));
+    }
+
+    for (const spreadsheetFile of spreadsheetFiles) {
+        try {
+            const records = await importSpreadsheetCsv(spreadsheetFile);
+            spreadsheetDatabase.push(...records);
+        } catch (error) {
+            console.warn(`Failed to import spreadsheet ${spreadsheetFile.name}:`, error);
+        }
+    }
+
+    rebuildTextSearch();
+    performSearch();
+
+    importArchiveButton.disabled = false;
+    importArchiveButton.textContent = 'Import Archive';
+    archiveFolderInput.value = '';
+}
+
+async function importImageIndex(file) {
+    const csvText = await file.text();
+
+    const results = await new Promise((resolve, reject) => {
+        Papa.parse(csvText, {
+            header: true,
+            skipEmptyLines: true,
+            complete: resolve,
+            error: reject
+        });
+    });
+
+    csvDatabase = results.data;
+    fuse = null;
+
+    return csvDatabase.length;
+}
+
+async function importSpreadsheetCsv(file) {
+    const csvText = await file.text();
+
+    const results = Papa.parse(csvText, { header: false, skipEmptyLines: true });
+    const records = [];
+
+    results.data.forEach((cells, index) => {
+        const rowNumber = index + 1;
+        records.push(makeSpreadsheetRecord(cells, rowNumber, file));
+    });
+
+    console.log(`Imported ${records.length} rows from spreadsheet ${file.name}`);
+    return records;
+}
+
+async function importTextFiles(files, format) {
+    const records = [];
+
+    for (const file of files) {
+        const text = await file.text();
+
+        let parsed;
+        if (format === 'filetree') {
+            parsed = parseFiletree(text, file.name);
+        } else if (format === 'lines') {
+            parsed = parseweblist(text, file.name, 'lines', 'filepath');
+        } else {
+            parsed = parseweblist(text, file.name, 'blocks', 'list');
+        }
+
+        records.push(...parsed);
+    }
+
+    return records;
+}
+
+function literalSearch(database, query, keys) {
+    const normalizedQuery = query.toLowerCase();
+
+    return database.filter(record => {
+        return keys.some(key => {
+            return String(record[key] ?? '')
+                .toLowerCase()
+                .includes(normalizedQuery);
+        });
+    });
+}
+
+function ensureArchiveFuzzyIndex() {
+    if (fuse || !csvDatabase.length) return;
+
+    fuse = new Fuse(csvDatabase, {
+        keys: CSV_SEARCH_KEYS,
+        includeScore: true,
+        threshold: fuzzyThreshold,
+        minMatchCharLength: 2,
+        ignoreLocation: true
+    });
+}
+
+function searchArchiveRecords(query) {
+    if (searchMode === 'literal') {
+        return literalSearch(csvDatabase, query, CSV_SEARCH_KEYS);
+    }
+
+    ensureArchiveFuzzyIndex();
+    return fuse.search(query).map(result => result.item);
+}
+
+function searchFiletreeRecords(query) {
+    if (searchMode === 'literal') {
+        return literalSearch(filetreeDatabase, query, TEXT_SEARCH_KEYS);
+    }
+
+    if (!filetreeFuse) {
+        filetreeFuse = new Fuse(filetreeDatabase, {
+            keys: TEXT_SEARCH_KEYS,
+            threshold: fuzzyThreshold,
+            minMatchCharLength: 2,
+            ignoreLocation: true
+        });
+    }
+
+    return filetreeFuse.search(query).map(result => result.item);
+}
+
+function searchListRecords(query) {
+    if (searchMode === 'literal') {
+        return literalSearch(listDatabase, query, TEXT_SEARCH_KEYS);
+    }
+
+    if (!listFuse) {
+        listFuse = new Fuse(listDatabase, {
+            keys: TEXT_SEARCH_KEYS,
+            threshold: fuzzyThreshold,
+            minMatchCharLength: 2,
+            ignoreLocation: true
+        });
+    }
+
+    return listFuse.search(query).map(result => result.item);
+}
+
+function searchFilepathRecords(query) {
+    if (searchMode === 'literal') {
+        return literalSearch(filepathDatabase, query, FILEPATH_SEARCH_KEYS);
+    }
+
+    if (!filepathFuse) {
+        filepathFuse = new Fuse(filepathDatabase, {
+            keys: FILEPATH_SEARCH_KEYS,
+            threshold: fuzzyThreshold,
+            minMatchCharLength: 2,
+            ignoreLocation: true
+        });
+    }
+
+    return filepathFuse.search(query).map(result => result.item);
+}
+
+function searchSpreadsheetRecords(query) {
+    if (searchMode === 'literal') {
+        return literalSearch(spreadsheetDatabase, query, SPREADSHEET_SEARCH_KEYS);
+    }
+
+    if (!spreadsheetFuse) {
+        spreadsheetFuse = new Fuse(spreadsheetDatabase, {
+            keys: SPREADSHEET_SEARCH_KEYS,
+            threshold: fuzzyThreshold,
+            minMatchCharLength: 2,
+            ignoreLocation: true
+        });
+    }
+
+    return spreadsheetFuse.search(query).map(result => result.item);
+}
+
+function searchMasterLogRecords(query) {
+    if (searchMode === 'literal') {
+        return literalSearch(masterLogDatabase, query, MASTER_LOG_SEARCH_KEYS);
+    }
+
+    if (!masterLogFuse) {
+        masterLogFuse = new Fuse(masterLogDatabase, {
+            keys: MASTER_LOG_SEARCH_KEYS,
+            threshold: fuzzyThreshold,
+            minMatchCharLength: 2,
+            ignoreLocation: true
+        });
+    }
+
+    return masterLogFuse.search(query).map(result => result.item);
+}
+
+// For master-log rows: show only the "Label: value" lines that matched
+function matchedLines(text, query) {
+    const lines = String(text || '').split('\n');
+    const q = String(query || '').toLowerCase();
+    const hits = q ? lines.filter(line => line.toLowerCase().includes(q)) : [];
+    return hits.length ? hits.join('\n') : (lines[0] || '');
+}
+
+const VAULT_PREVIEW_LINES = 2;
+const VAULT_TEXT_COLUMNS = [
+    'IMAGE ID', 'Tape #', 'Studio', 'Client', 'Artist',
+    'Date', 'Title / Track', 'Type', 'Notes'
+];
+
+function renderTable(data) {
+    resultsBody.innerHTML = '';
+
+    if (data.length === 0) {
+        csvStatusDiv.textContent = "No results found.";
+        return;
+    }
+
+    const query = searchInput.value.trim();
+    csvStatusDiv.textContent =
+        `Found ${data.length} results${query ? ` for "${query}"` : ''}. Expand to view.`;
+
+    data.forEach(item => {
+        const row = document.createElement('tr');
+			VAULT_TEXT_COLUMNS.forEach(column => {
+		row.appendChild(createExpandableCell(item[column], VAULT_PREVIEW_LINES));
+        });
+
+        const sourceFiles = (item['Source'] || '')
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean);
+
+        row.appendChild(renderImageCell(sourceFiles, getImageUrl, 96, 72));
+
+        row.appendChild(createExpandableCell(item['Code'], VAULT_PREVIEW_LINES));
+
+        resultsBody.appendChild(row);
+    });
+}
+
+function parseFiletree(text, fileName) {
+    const physicalLines = splitPhysicalLines(text);
+    const stem = sourceStem(fileName);
+    const records = [];
+    const pathStack = [];
+
+    let rootName = '';
+    let currentVolume = '';
+
+    physicalLines.forEach((physicalLine, index) => {
+        const lineNumber = index + 1;
+        const trimmedLine = physicalLine.trim();
+
+        if (!trimmedLine) return;
+        if (/^\d+\s+directories,\s*\d+\s+files$/i.test(trimmedLine)) {
+            return;
+        }
+
+        const branchMatch = physicalLine.match(
+            /^(.*?)(?:├──|└──)\s?(.*)$/
+        );
+
+        let depth;
+        let entryName;
+
+        if (branchMatch) {
+            depth = Math.floor(branchMatch[1].length / 4) + 1;
+            entryName = branchMatch[2].trim();
+        } else {
+            depth = 0;
+            entryName = trimmedLine;
+        }
+
+        if (!entryName) return;
+
+        const parentPath = depth > 0
+            ? (pathStack[depth - 1] || '')
+            : '';
+
+        const fullPath = joinPath(parentPath, entryName);
+
+        if (records.length === 0) {
+            rootName = entryName;
+        }
+
+        if (depth === 0) {
+            currentVolume = '';
+        } else if (rootName === '/Volumes') {
+            if (depth === 1) {
+                currentVolume = entryName.replace(/\s+->.*$/, '');
+            }
+        } else {
+            currentVolume = '';
+        }
+
+        const id = `${stem}_${padNumber(lineNumber, 6)}`;
+
+        const record = {
+            kind: 'filetree',
+            id: id,
+            filetreeId: id,
+            listId: '',
+            sourceFile: fileName,
+            matchingText: entryName,
+            fullPath: fullPath,
+            sourceDirectory: parentPath,
+            volume: currentVolume,
+            lineNumber: lineNumber,
+            depth: depth,
+            hasChildren: false
+        };
+
+        records.push(record);
+
+        pathStack[depth] = fullPath;
+        pathStack.length = depth + 1;
+    });
+
+    records.forEach((record, index) => {
+        const nextRecord = records[index + 1];
+        record.hasChildren = Boolean(
+            nextRecord && nextRecord.depth > record.depth
+        );
+    });
+
+    return records;
+}
+
+function groupSpreadsheetResultsByFile(records) {
+    const grouped = new Map();
+
+    records.forEach(record => {
+        const key = record.sourceFile;
+        if (!grouped.has(key)) {
+            grouped.set(key, {
+                ...record,
+                matchedRows: [],
+                combinedSearchText: []
+            });
+        }
+        const group = grouped.get(key);
+        group.matchedRows.push(record.rowNumber);
+        group.combinedSearchText.push(record.searchText);
+    });
+
+    return Array.from(grouped.values()).map(group => ({
+        ...group,
+        rowNumber: group.matchedRows.join(', '),
+        searchText: group.combinedSearchText.join('\n---\n')
+    }));
+}
+
+function selectDeepestMatchingDirectories(matches) {
+    const recordsByPath = new Map();
+
+    filetreeDatabase.forEach(record => {
+        recordsByPath.set(
+            textSourceKey(record.sourceFile, record.fullPath),
+            record
+        );
+    });
+
+    const candidates = new Map();
+
+    matches.forEach(match => {
+        const literalMatchedText = match.matchingText;
+
+        let directory = match;
+
+        const appearsToBeFile = (
+            !match.hasChildren &&
+            match.depth > 0 &&
+            /\.[^./\\]+$/.test(match.matchingText)
+        );
+
+        if (appearsToBeFile && match.sourceDirectory) {
+            directory = recordsByPath.get(
+                textSourceKey(match.sourceFile, match.sourceDirectory)
+            ) || match;
+        }
+
+        const key = textSourceKey(directory.sourceFile, directory.fullPath);
+
+        const existingCandidate = candidates.get(key);
+
+        if (existingCandidate) {
+            existingCandidate.matchedTexts.add(literalMatchedText);
+            existingCandidate.matchingText = Array.from(
+                existingCandidate.matchedTexts
+            ).join('\n');
+        } else {
+            candidates.set(key, {
+                ...directory,
+                matchingText: literalMatchedText,
+                matchedTexts: new Set([literalMatchedText])
+            });
+        }
+    });
+
+    const deepestFirst = Array.from(candidates.values())
+        .sort((a, b) => b.depth - a.depth);
+
+    const retained = [];
+
+    deepestFirst.forEach(candidate => {
+        const hasDeeperMatch = retained.some(other => {
+            if (other.sourceFile !== candidate.sourceFile) return false;
+
+            const prefix = candidate.fullPath.endsWith('/')
+                ? candidate.fullPath
+                : `${candidate.fullPath}/`;
+
+            return other.fullPath.startsWith(prefix);
+        });
+
+        if (!hasDeeperMatch) {
+            retained.push(candidate);
+        }
+    });
+
+    return retained.sort((a, b) => {
+        if (a.sourceFile !== b.sourceFile) {
+            return a.sourceFile.localeCompare(b.sourceFile);
+        }
+        return a.lineNumber - b.lineNumber;
+    });
+}
+
+function parseweblist(text, fileName, mode, kind = 'list') {
+    const physicalLines = splitPhysicalLines(text);
+    const stem = sourceStem(fileName);
+    const records = [];
+
+    let blockLines = [];
+    let startLine = null;
+
+    function addRecord(lines, firstLine, lastLine) {
+        const blockNumber = records.length + 1;
+        const id = [
+            stem,
+            `${padNumber(firstLine, 6)}-${padNumber(lastLine, 6)}`,
+            padNumber(blockNumber, 3)
+        ].join('_');
+
+        records.push({
+            kind: kind,
+            id: id,
+            filetreeId: '',
+            listId: id,
+            sourceFile: fileName,
+            matchingText: lines.join('\n'),
+            fullPath: '',
+            sourceDirectory: '',
+            volume: '',
+            blockNumber: blockNumber,
+            startLine: firstLine,
+            endLine: lastLine,
+            lines: lines.slice()
+        });
+    }
+
+    function flushBlock(endLine) {
+        if (blockLines.length && startLine !== null) {
+            addRecord(blockLines, startLine, endLine);
+        }
+
+        blockLines = [];
+        startLine = null;
+    }
+
+    physicalLines.forEach((line, index) => {
+        const lineNumber = index + 1;
+        const isBlank = /^\s*$/.test(line);
+
+        if (mode === 'lines') {
+            if (!isBlank) {
+                addRecord([line], lineNumber, lineNumber);
+            }
+            return;
+        }
+
+        if (isBlank) {
+            flushBlock(index);
+            return;
+        }
+
+        if (startLine === null) {
+            startLine = lineNumber;
+        }
+
+        blockLines.push(line);
+    });
+
+    if (mode !== 'lines') {
+        flushBlock(physicalLines.length);
+    }
+
+    return records;
+}
+
+function rebuildTextSearch() {
+    filetreeDatabase = textRecords.filter(
+        record => record.kind === 'filetree'
+    );
+
+    listDatabase = textRecords.filter(
+        record => record.kind === 'list'
+    );
+
+    filepathDatabase = textRecords.filter(
+        record => record.kind === 'filepath'
+    );
+
+    filetreeFuse = null;
+    listFuse = null;
+    filepathFuse = null;
+    spreadsheetFuse = null;
+    masterLogFuse = null;
+
+    fileStatusDiv.textContent = driveImportSummary();
+
+    searchInput.disabled = false;
+    // searchInput.placeholder = 'Search database...';
+    searchButton.disabled = false;
+    searchInput.placeholder = 'Search database...';
+}
+
+function driveRecordCount() {
+    return filetreeDatabase.length + spreadsheetDatabase.length +
+        filepathDatabase.length + masterLogDatabase.length;
+}
+
+function driveImportSummary() {
+    if (!driveRecordCount()) return 'Hard drive files not loaded';
+    return `${filetreeDatabase.length} filetree + ` +
+        `${spreadsheetDatabase.length} spreadsheet + ` +
+        `${filepathDatabase.length} filepath + ` +
+        `${masterLogDatabase.length} master log records loaded`;
+}
+
+function webImportSummary() {
+    if (!listDatabase.length) {
+        return 'Web archive not loaded';
+    }
+
+    const sources = new Set(
+        listDatabase.map(record => record.sourceFile)
+    );
+
+    return `${sources.size} text source(s) imported: ` +
+        `${listDatabase.length} list records.`;
+}
+
+function appendMultilineText(cell, text) {
+    const lines = String(text || '').split('\n');
+
+    lines.forEach((line, index) => {
+        if (index > 0) {
+            cell.appendChild(document.createElement('br'));
+        }
+        cell.appendChild(document.createTextNode(line));
+    });
+}
+
+function makeTextCell(value, multiline = false) {
+    const cell = document.createElement('td');
+
+    if (multiline) {
+        appendMultilineText(cell, value);
+        cell.dataset.fullText = String(value || '');
+    } else {
+        cell.textContent = value || '';
+    }
+
+    return cell;
+}
+
+function renderTextTable(data, query) {
+    webResultsBody.innerHTML = '';
+
+    if (!data.length) {
+        webStatusDiv.textContent = query
+            ? 'No results found.'
+            : webImportSummary();
+        return;
+    }
+
+    webStatusDiv.textContent = query
+        ? `Found ${data.length} text results for "${query}".`
+        : `Showing all ${data.length} text records.`;
+
+    data.forEach(record => {
+        const row = document.createElement('tr');
+        row.className = 'result-row';
+
+        row.appendChild(makeTextCell(record.sourceFile));
+        row.appendChild(makeTextCell(record.matchingText, true));
+
+        const onlineCell = document.createElement('td');
+        const links = webArchiveLinksMap.get(record.sourceFile.toLowerCase());
+
+        if (links?.online) {
+            const link = document.createElement('a');
+            link.href = links.online;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = 'Wayback';
+            onlineCell.appendChild(link);
+            onlineCell.dataset.fullText = links.online;
+        } else {
+            onlineCell.textContent = '';
+        }
+        row.appendChild(onlineCell);
+
+        const offlineCell = document.createElement('td');
+
+        if (links?.offline) {
+			offlineCell.dataset.fullText = 'Local file';
+            const hasFile = checkOfflineFileExists(links.offline);
+
+            if (hasFile) {
+                const viewBtn = document.createElement('button');
+                viewBtn.textContent = 'VIEW';
+                viewBtn.className = 'file-label';
+                viewBtn.style.padding = '4px 8px';
+                viewBtn.style.fontSize = '0.85em';
+
+                const previewRow = document.createElement('tr');
+                previewRow.className = 'preview-row';
+                previewRow.style.display = 'none';
+                const previewCell = document.createElement('td');
+                previewCell.colSpan = 4;
+                previewCell.style.padding = '0';
+                previewCell.style.background = 'var(--bg)';
+
+                const previewContainer = document.createElement('div');
+                previewContainer.style.padding = '10px';
+                previewCell.appendChild(previewContainer);
+                previewRow.appendChild(previewCell);
+
+                let isOpen = false;
+                viewBtn.addEventListener('click', () => {
+                    isOpen = !isOpen;
+                    if (isOpen) {
+                        previewRow.style.display = 'table-row';
+                        viewBtn.textContent = 'HIDE';
+                        viewBtn.style.background = 'var(--hover_bg)';
+                        createOfflinePreview(links.offline, previewContainer);
+                    } else {
+                        const rowRect = row.getBoundingClientRect();
+                        const scrollOffset = rowRect.top;
+
+                        previewRow.style.display = 'none';
+                        viewBtn.textContent = 'VIEW';
+                        viewBtn.style.background = '';
+                        previewContainer.innerHTML = '';
+
+                        const newRowRect = row.getBoundingClientRect();
+                        const scrollDelta = newRowRect.top - scrollOffset;
+                        window.scrollBy(0, scrollDelta);
+                    }
+                });
+
+                offlineCell.appendChild(viewBtn);
+                row._previewRow = previewRow;
+            } else {
+                offlineCell.innerHTML = '<span style="color: #888;">Not imported</span>';
+            }
+        } else {
+            offlineCell.textContent = '';
+        }
+        row.appendChild(offlineCell);
+
+        webResultsBody.appendChild(row);
+
+        if (row._previewRow) {
+            webResultsBody.appendChild(row._previewRow);
+        }
+    });
+}
+
+function checkOfflineFileExists(offlinePath) {
+    const normalizedPath = offlinePath
+        .replace(/\\/g, '/')
+        .replace(/^archive\//, '')
+        .toLowerCase();
+
+    const fileName = normalizedPath.split('/').pop();
+
+    return offlineFilesMap.has(normalizedPath) ||
+           offlineFilesMap.has(fileName);
+}
+
+function createOfflinePreview(offlinePath, container) {
+    const normalizedPath = offlinePath
+        .replace(/\\/g, '/')
+        .replace(/^archive\//, '')
+        .toLowerCase();
+
+    const lastSlashIndex = normalizedPath.lastIndexOf('/');
+    const fileName = lastSlashIndex > 0 ? normalizedPath.substring(lastSlashIndex + 1) : normalizedPath;
+
+    let htmlFile = offlineFilesMap.get(normalizedPath);
+    if (!htmlFile) {
+        htmlFile = offlineFilesMap.get(fileName);
+    }
+
+    if (!htmlFile) {
+        container.innerHTML = '<p style="color: #888;">Offline file not found in imported archive.</p>';
+        return;
+    }
+
+    container.innerHTML = '';
+
+    // Real on-disk path (original capitalization) from the imported File object
+    const actualRelativePath = archiveRelativePath(htmlFile);
+    const rootFolder = (htmlFile.webkitRelativePath || '').split('/')[0] || 'archive';
+    const displayFolder = actualRelativePath.includes('/')
+        ? actualRelativePath.slice(0, actualRelativePath.lastIndexOf('/'))
+        : '';
+
+    const folderInfo = document.createElement('div');
+    folderInfo.style.padding = '10px';
+    folderInfo.style.background = 'var(--even_row)';
+    folderInfo.style.borderRadius = '3px';
+
+    const folderLabel = document.createElement('p');
+    folderLabel.style.margin = '0 0 10px 0';
+    folderLabel.style.fontWeight = 'bold';
+    folderLabel.textContent = `Open HTML file at: .../${rootFolder}/${displayFolder || 'root'}`;
+
+    folderInfo.appendChild(folderLabel);
+    container.appendChild(folderInfo);
+}
+
+function buildVolumeTooltip(driveInfo) {
+    const parts = [];
+
+    if (driveInfo.altHdName) {
+        parts.push(`Alternate name: ${driveInfo.altHdName}`);
+    }
+
+    if (driveInfo.writtenShowLogDate || driveInfo.writtenShowLogArtist) {
+        const logParts = [driveInfo.writtenShowLogDate, driveInfo.writtenShowLogArtist]
+            .filter(Boolean);
+        parts.push(`[Written Log: ${logParts.join(' — ')}]`);
+    }
+
+    return parts.join('\n');
+}
+
+function appendDriveRow({ backupId, sourceFile, matchingText, pathText, volume }) {
+    const driveInfo = getDriveInfo(backupId);
+    const row = document.createElement('tr');
+
+    const volumeCell = makeTextCell(volume || driveInfo.hdName || 'Unknown');
+    const tooltip = buildVolumeTooltip(driveInfo);
+    if (tooltip) volumeCell.setAttribute('data-note', tooltip);
+
+    const imagesCell = renderImageCell(driveInfo.screenshots, getScreenshotUrl, 80, 60);
+
+    row.append(
+        makeTextCell(backupId),
+        makeTextCell(driveInfo.type),
+        createExpandableCell(driveInfo.notes, 3),
+        makeTextCell(sourceFile),
+        createExpandableCell(matchingText, 3),
+        createExpandableCell(pathText, 2),
+        volumeCell,
+        imagesCell
+    );
+
+    fileResultsBody.appendChild(row);
+}
+
+function flattenForExport(text) {
+    const lines = String(text ?? '')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean);
+
+    return lines.map((line, index) => {
+        if (index === lines.length - 1) return line;
+        return /[.!?:;]$/.test(line) ? `${line}  ` : `${line}.  `;
+    }).join('');
+}
+
+function renderCombinedFileResults({ filetree, spreadsheet, filepath, masterLog }, query) {
+    fileResultsBody.innerHTML = '';
+
+    const totalCount =
+        filetree.length + spreadsheet.length + filepath.length + masterLog.length;
+
+    if (!totalCount) {
+        fileStatusDiv.textContent = query ? 'No results found.' : driveImportSummary();
+        return;
+    }
+
+    fileStatusDiv.textContent = query
+        ? `Found ${totalCount} results for "${query}".`
+        : `Showing all ${totalCount} hard drive records.`;
+
+    masterLog.forEach(record => appendDriveRow({
+        backupId: record.backupId,
+        sourceFile: record.sourceFile,
+        matchingText: matchedLines(record.searchText, query),
+        pathText: `Row ${record.rowNumber}`
+    }));
+
+    filetree.forEach(record => appendDriveRow({
+        backupId: record.backupId || extractBackupIdFromFilename(record.sourceFile),
+        sourceFile: record.sourceFile,
+        matchingText: record.matchingText,
+        pathText: record.fullPath,
+        volume: record.volume
+    }));
+
+    spreadsheet.forEach(record => appendDriveRow({
+        backupId: record.backupId || extractBackupIdFromFilename(record.sourceFile),
+        sourceFile: record.sourceFile,
+        matchingText: record.searchText,
+        pathText: `Row ${record.rowNumber}`
+    }));
+
+    filepath.forEach(record => appendDriveRow({
+        backupId: extractBackupIdFromFilename(record.sourceFile),
+        sourceFile: record.sourceFile,
+        matchingText: record.matchingText,
+        pathText: `Line ${record.startLine}`
+    }));
+}
+
+let lastQuery = '';
+
+function performSearch() {
+	console.log("\nEXECUTE: performSearch() @ line 2498:")
+
+    const query = searchInput.value.trim();
+    lastQuery = query.toUpperCase();
+    console.log(`lastQuery = ${lastQuery}`)
+
+    if (query === '') {
+        webResultsBody.innerHTML = '';
+        fileResultsBody.innerHTML = '';
+        resultsBody.innerHTML = '';
+
+        webStatusDiv.textContent = listDatabase.length
+            ? `${webImportSummary()} Enter a query to view.`
+            : 'Web files not loaded';
+
+        fileStatusDiv.textContent = driveRecordCount()
+            ? `${driveImportSummary()}. Enter a query to view.`
+            : 'Hard drive files not loaded';
+
+        if (csvDatabase.length) {
+            renderTable(csvDatabase);
+        } else {
+            resultsBody.innerHTML = '';
+            csvStatusDiv.textContent = 'CSV not loaded';
+        }
+
+        return;
+    }
+
+    if (csvDatabase.length) {
+        renderTable(searchArchiveRecords(query));
+    } else {
+        resultsBody.innerHTML = '';
+        csvStatusDiv.textContent = 'Nothing to search...';
+    }
+
+    if (!listDatabase.length) {
+        webResultsBody.innerHTML = '';
+        webStatusDiv.textContent = 'Nothing to search...';
+    } else {
+        const listResults = searchListRecords(query);
+        renderTextTable(listResults, query);
+    }
+
+    if (!driveRecordCount()) {
+        fileResultsBody.innerHTML = '';
+        fileStatusDiv.textContent = 'Nothing to search...';
+    } else {
+        renderCombinedFileResults({
+            filetree: selectDeepestMatchingDirectories(searchFiletreeRecords(query)),
+            spreadsheet: searchSpreadsheetRecords(query),
+            filepath: searchFilepathRecords(query),
+            masterLog: searchMasterLogRecords(query)
+        }, query);
+    }
+}
+
+function allowProgressBarToPaint() {
+    return new Promise(resolve => {
+        requestAnimationFrame(() => {
+            setTimeout(resolve, 0);
+        });
+    });
+}
+
+async function executeSearch() {
+    searchProgress.hidden = false;
+    void searchProgress.offsetWidth;
+
+    await allowProgressBarToPaint();
+
+    try {
+        performSearch();
+    } catch (error) {
+        console.error('Search failed:', error);
+        webStatusDiv.textContent = `Search failed: ${errorMessage(error)}`;
+    } finally {
+        searchProgress.hidden = true;
+    }
+}
+
+const searchModeButtons = Array.from(
+    document.querySelectorAll('.search-mode-button')
+);
+
+// The tolerance slider's visibility is driven purely by CSS from the
+// aria-pressed state of the fuzzy button, so this only needs to sync that.
+function updateSearchModeButtons() {
+    searchModeButtons.forEach(button => {
+        button.setAttribute(
+            'aria-pressed',
+            String(button.dataset.searchMode === searchMode)
+        );
+    });
+}
+
+searchModeButtons.forEach(button => {
+    button.addEventListener('click', () => {
+        const nextMode = button.dataset.searchMode;
+
+        if (nextMode === searchMode) return;
+
+        searchMode = nextMode;
+        updateSearchModeButtons();
+    });
+});
+
+function runSearch() {
+    if (searchInput.disabled) return;
+    executeSearch();
+}
+
+searchButton.addEventListener('click', runSearch);
+
+searchInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+       runSearch();
+    }
+});
+
+updateSearchModeButtons();
+
+document.querySelectorAll('.export-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const section = btn.dataset.section;
+        exportSectionToCsv(section);
+    });
+});
+
+function exportSectionToCsv(section) {
+	console.log("\nEXECUTE: exportSectionToCsv() @ line 2630")
+    let rows = [];
+    let filename = '';
+
+    console.log(`last search input = ${searchInput.value}`)
+	console.log(`last performed search = ${lastQuery}.  this is what gets saved on export file`)
+
+    if (section === 'file') {
+        const table = document.getElementById('fileResultsTable');
+        rows = tableToCsvRows(table);
+        filename = `hard-drive-results_${lastQuery}.csv`;
+    } else if (section === 'web') {
+        const table = document.getElementById('webResultsTable');
+        rows = tableToCsvRows(table);
+        filename = `web-results_${lastQuery}.csv`;
+    } else if (section === 'vault') {
+        const table = document.getElementById('csvResultsTable');
+        rows = tableToCsvRows(table);
+        filename = `vault-results_${lastQuery}.csv`;
+    }
+
+    if (rows.length > 0) {
+        downloadCsv(rows.join('\n'), filename);
+    }
+}
+
+function flattenForExport(text) {
+    const lines = String(text ?? '')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean);
+
+    return lines.map((line, index) => {
+        if (index === lines.length - 1) return line;
+        return /[.!?:;]$/.test(line) ? `${line}  ` : `${line}.  `;
+    }).join('');
+}
+
+function tableToCsvRows(table) {
+    const rows = [];
+    table.querySelectorAll('tr').forEach(tr => {
+        if (tr.classList.contains('preview-row')) return; // hidden web preview rows
+        const cells = [];
+        tr.querySelectorAll('th, td').forEach(cell => {
+            let raw;
+            if (cell.dataset.fullText !== undefined) {
+                // Expandable, link and image cells carry their export value directly
+                raw = cell.dataset.fullText;
+            } else if (cell.querySelector('.image-link, .image-missing')) {
+                raw = Array.from(cell.querySelectorAll('.image-link, .image-missing'))
+                    .map(node => node.title || node.textContent)
+                    .join(IMAGE_EXPORT_SEPARATOR);
+            } else {
+                raw = cell.textContent;
+            }
+            let text = flattenForExport(raw);
+            if (/[",]/.test(text)) {
+                text = '"' + text.replace(/"/g, '""') + '"';
+            }
+            cells.push(text);
+        });
+        rows.push(cells.join(','));
+    });
+    return rows;
+}
+
+function downloadCsv(content, filename) {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+async function loadwrittenShowLog(files) {
+    const logFile = files.find(file => {
+        const rel = archiveRelativePath(file).toLowerCase();
+        return rel === ARCHIVE_PATHS.writtenShowLog.toLowerCase() ||
+               rel.endsWith('cm midnight ramble hd log.csv');
+    });
+
+    if (!logFile) {
+        console.warn('CM Midnight Ramble HD Log.csv not found');
+        return;
+    }
+
+    try {
+        const csvData = await readCsvWithHeaders(logFile);
+        writtenShowLogMap.clear();
+
+        csvData.forEach(row => {
+            const backupId = row['BACKUP ID']?.trim();
+            const hdName = row['HD']?.trim();
+            const date = row['Date']?.trim();
+            const showNotes = row['Show Notes']?.trim();
+            const artist = row['Artist']?.trim();
+
+            if (backupId) {
+                writtenShowLogMap.set(backupId.toLowerCase(), {
+                    hdName: hdName || '',
+                    date: date || '',
+                    showNotes: showNotes || '',
+                    artist: artist || ''
+                });
+            }
+        });
+
+        console.log(`Loaded ${writtenShowLogMap.size} written log entries`);
+    } catch (error) {
+        console.error('Failed to load written log:', error);
+    }
+}
+</script>
+
+</body>
+</html>
